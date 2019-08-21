@@ -15,21 +15,24 @@ detection_layer make_detection_layer(int batch, int inputs, int n, int side, int
     detection_layer l = { (LAYER_TYPE)0 };
     l.type = DETECTION;
 
-    l.n = n;
-    l.batch = batch;
-    l.inputs = inputs;
-    l.classes = classes;
-    l.coords = coords;
+    l.n = n;                // number of bounding boxes in each grid cell
+    l.batch = batch;        // ?? batch size
+    l.inputs = inputs;      // the output size (the 3d matrix) of each image
+    l.classes = classes;    // number of classification categories, depends the value in the cfg file
+    l.coords = coords;      // number of bounding box's coords (w, h, s, w), so l.coords is 4
     l.rescore = rescore;
-    l.side = side;
+    l.side = side;          // number of grid cells in each side
     l.w = side;
     l.h = side;
+
+    // to make sure `inputs`'s value is correct
     assert(side*side*((1 + l.coords)*l.n + l.classes) == inputs);
-    l.cost = (float*)calloc(1, sizeof(float));
+
+    l.cost = (float*)calloc(1, sizeof(float));                  // to store the cost function value
     l.outputs = l.inputs;
-    l.truths = l.side*l.side*(1+l.coords+l.classes);
-    l.output = (float*)calloc(batch * l.outputs, sizeof(float));
-    l.delta = (float*)calloc(batch * l.outputs, sizeof(float));
+    l.truths = l.side*l.side*(1+l.coords+l.classes);            // ground truth bounding boxes for all grid cells
+    l.output = (float*)calloc(batch * l.outputs, sizeof(float));// the memory for all batch's output
+    l.delta = (float*)calloc(batch * l.outputs, sizeof(float)); // ??
 
     l.forward = forward_detection_layer;
     l.backward = backward_detection_layer;
@@ -63,6 +66,8 @@ void forward_detection_layer(const detection_layer l, network_state state)
             }
         }
     }
+
+    // cost function is only for training stage
     if(state.train){
         float avg_iou = 0;
         float avg_cat = 0;
@@ -73,14 +78,25 @@ void forward_detection_layer(const detection_layer l, network_state state)
         *(l.cost) = 0;
         int size = l.inputs * l.batch;
         memset(l.delta, 0, size * sizeof(float));
+
+        // loop each batch
         for (b = 0; b < l.batch; ++b){
             int index = b*l.inputs;
+
+            // loop all grid cells, e.g., locations = 7*7 = 49
             for (i = 0; i < locations; ++i) {
                 int truth_index = (b*locations + i)*(1+l.coords+l.classes);
+
+                // whether a grid cell contains the center of an object
                 int is_obj = state.truth[truth_index];
-                for (j = 0; j < l.n; ++j) {
+
+                // 1. calculate IOU ERROR
+                // loop `l.n` bounding boxes for each grid cell (from cfg file, e.g., num=5)
+                for (j = 0; j < l.n; ++j) { 
                     int p_index = index + locations*l.classes + i*l.n + j;
                     l.delta[p_index] = l.noobject_scale*(0 - l.output[p_index]);
+
+                    // assume there's no object in each grid cell and calculate the IOU cost
                     *(l.cost) += l.noobject_scale*pow(l.output[p_index], 2);
                     avg_anyobj += l.output[p_index];
                 }
@@ -89,22 +105,29 @@ void forward_detection_layer(const detection_layer l, network_state state)
                 float best_iou = 0;
                 float best_rmse = 20;
 
+                /* if there is no object in current grid cell, return!
+                   actually, for most grid cells, no object exists. */
                 if (!is_obj){
                     continue;
                 }
 
+                // 2. calculate Classification ERROR
                 int class_index = index + i*l.classes;
                 for(j = 0; j < l.classes; ++j) {
                     l.delta[class_index+j] = l.class_scale * (state.truth[truth_index+1+j] - l.output[class_index+j]);
                     *(l.cost) += l.class_scale * pow(state.truth[truth_index+1+j] - l.output[class_index+j], 2);
-                    if(state.truth[truth_index + 1 + j]) avg_cat += l.output[class_index+j];
+                    if(state.truth[truth_index + 1 + j]) {
+                        avg_cat += l.output[class_index+j];
+                    }
                     avg_allcat += l.output[class_index+j];
                 }
 
+                // get the ground truth bounding box of current grid cell's object
                 box truth = float_to_box(state.truth + truth_index + 1 + l.classes);
                 truth.x /= l.side;
                 truth.y /= l.side;
 
+                // loop all bounding boxes, find the one who is "resposible" for object detection
                 for(j = 0; j < l.n; ++j){
                     int box_index = index + locations*(l.classes + l.n) + (i*l.n + j) * l.coords;
                     box out = float_to_box(l.output + box_index);
@@ -116,9 +139,12 @@ void forward_detection_layer(const detection_layer l, network_state state)
                         out.h = out.h*out.h;
                     }
 
+                    // calculate IOU between current and the ground truth bounding boxes
                     float iou  = box_iou(out, truth);
-                    //iou = 0;
+                    // calculate RMSE (root-mean-square error)
                     float rmse = box_rmse(out, truth);
+
+                    // find the best bounding box with the max(IOU), if all IOU is 0, find min(RMSE)
                     if(best_iou > 0 || iou > 0){
                         if(iou > best_iou){
                             best_iou = iou;
