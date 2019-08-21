@@ -13,7 +13,7 @@
 detection_layer make_detection_layer(int batch, int inputs, int n, int side, int classes, int coords, int rescore)
 {
     detection_layer l = { (LAYER_TYPE)0 };
-    l.type = DETECTION;
+    l.type = DETECTION;     // set layer type
 
     l.n = n;                // number of bounding boxes in each grid cell
     l.batch = batch;        // ?? batch size
@@ -32,7 +32,7 @@ detection_layer make_detection_layer(int batch, int inputs, int n, int side, int
     l.outputs = l.inputs;
     l.truths = l.side*l.side*(1+l.coords+l.classes);            // ground truth bounding boxes for all grid cells
     l.output = (float*)calloc(batch * l.outputs, sizeof(float));// the memory for all batch's output
-    l.delta = (float*)calloc(batch * l.outputs, sizeof(float)); // ??
+    l.delta = (float*)calloc(batch * l.outputs, sizeof(float)); // the loss delta, used to calculate the final cost
 
     l.forward = forward_detection_layer;
     l.backward = backward_detection_layer;
@@ -85,19 +85,21 @@ void forward_detection_layer(const detection_layer l, network_state state)
 
             // loop all grid cells, e.g., locations = 7*7 = 49
             for (i = 0; i < locations; ++i) {
+                // get the ground truth bounding box's offset
                 int truth_index = (b*locations + i)*(1+l.coords+l.classes);
 
-                // whether a grid cell contains the center of an object
+                // whether a grid cell contains the center of an object. (whether `truth[truth_index]` is NULL)
                 int is_obj = state.truth[truth_index];
 
                 // 1. calculate IOU ERROR
                 // loop `l.n` bounding boxes for each grid cell (from cfg file, e.g., num=5)
                 for (j = 0; j < l.n; ++j) { 
                     int p_index = index + locations*l.classes + i*l.n + j;
+                    
+                    // assume there's no object in each grid cell and calculate the IOU cost
+                    // the grid cells which contain objects, extra cost will be deducted later
                     l.delta[p_index] = l.noobject_scale*(0 - l.output[p_index]);
 
-                    // assume there's no object in each grid cell and calculate the IOU cost
-                    *(l.cost) += l.noobject_scale*pow(l.output[p_index], 2);
                     avg_anyobj += l.output[p_index];
                 }
 
@@ -115,7 +117,7 @@ void forward_detection_layer(const detection_layer l, network_state state)
                 int class_index = index + i*l.classes;
                 for(j = 0; j < l.classes; ++j) {
                     l.delta[class_index+j] = l.class_scale * (state.truth[truth_index+1+j] - l.output[class_index+j]);
-                    *(l.cost) += l.class_scale * pow(state.truth[truth_index+1+j] - l.output[class_index+j], 2);
+                    
                     if(state.truth[truth_index + 1 + j]) {
                         avg_cat += l.output[class_index+j];
                     }
@@ -124,8 +126,8 @@ void forward_detection_layer(const detection_layer l, network_state state)
 
                 // get the ground truth bounding box of current grid cell's object
                 box truth = float_to_box(state.truth + truth_index + 1 + l.classes);
-                truth.x /= l.side;
-                truth.y /= l.side;
+                truth.x /= l.side;  // ??
+                truth.y /= l.side;  // ??
 
                 // loop all bounding boxes, find the one who is "resposible" for object detection
                 for(j = 0; j < l.n; ++j){
@@ -158,6 +160,7 @@ void forward_detection_layer(const detection_layer l, network_state state)
                     }
                 }
 
+                // `forced` is 0 by default
                 if(l.forced){
                     if(truth.w*truth.h < .1){
                         best_index = 1;
@@ -165,11 +168,14 @@ void forward_detection_layer(const detection_layer l, network_state state)
                         best_index = 0;
                     }
                 }
+                // `random` is 0 by default
                 if(l.random && *(state.net.seen) < 64000){
                     best_index = rand()%l.n;
                 }
 
+                // get best (regarding IOU/RMSE) bounding box's coords offset in `l.output`'s memory
                 int box_index = index + locations*(l.classes + l.n) + (i*l.n + best_index) * l.coords;
+                // get current grid cell's gound truth bounding box's offset in `state.truth`'s memory
                 int tbox_index = truth_index + 1 + l.classes;
 
                 box out = float_to_box(l.output + box_index);
@@ -182,16 +188,18 @@ void forward_detection_layer(const detection_layer l, network_state state)
                 float iou  = box_iou(out, truth);
 
                 //printf("%d,", best_index);
-                int p_index = index + locations*l.classes + i*l.n + best_index;
-                *(l.cost) -= l.noobject_scale * pow(l.output[p_index], 2);
-                *(l.cost) += l.object_scale * pow(1-l.output[p_index], 2);
-                avg_obj += l.output[p_index];
-                l.delta[p_index] = l.object_scale * (1.-l.output[p_index]);
 
+                // 3. calculate IOU ERROR
+                // get best (regarding IOU/RMSE) bounding box's confidence offset in `l.output`'s memory
+                int p_index = index + locations*l.classes + i*l.n + best_index;
+                avg_obj += l.output[p_index];
+
+                l.delta[p_index] = l.object_scale * (1.-l.output[p_index]);
                 if(l.rescore){
                     l.delta[p_index] = l.object_scale * (iou - l.output[p_index]);
                 }
 
+                // 4. calculate Coordinates ERROR
                 l.delta[box_index+0] = l.coord_scale*(state.truth[tbox_index + 0] - l.output[box_index + 0]);
                 l.delta[box_index+1] = l.coord_scale*(state.truth[tbox_index + 1] - l.output[box_index + 1]);
                 l.delta[box_index+2] = l.coord_scale*(state.truth[tbox_index + 2] - l.output[box_index + 2]);
@@ -201,41 +209,13 @@ void forward_detection_layer(const detection_layer l, network_state state)
                     l.delta[box_index+3] = l.coord_scale*(sqrt(state.truth[tbox_index + 3]) - l.output[box_index + 3]);
                 }
 
-                *(l.cost) += pow(1-iou, 2);
                 avg_iou += iou;
                 ++count;
             }
         }
 
-        if(0){
-            float* costs = (float*)calloc(l.batch * locations * l.n, sizeof(float));
-            for (b = 0; b < l.batch; ++b) {
-                int index = b*l.inputs;
-                for (i = 0; i < locations; ++i) {
-                    for (j = 0; j < l.n; ++j) {
-                        int p_index = index + locations*l.classes + i*l.n + j;
-                        costs[b*locations*l.n + i*l.n + j] = l.delta[p_index]*l.delta[p_index];
-                    }
-                }
-            }
-            int indexes[100];
-            top_k(costs, l.batch*locations*l.n, 100, indexes);
-            float cutoff = costs[indexes[99]];
-            for (b = 0; b < l.batch; ++b) {
-                int index = b*l.inputs;
-                for (i = 0; i < locations; ++i) {
-                    for (j = 0; j < l.n; ++j) {
-                        int p_index = index + locations*l.classes + i*l.n + j;
-                        if (l.delta[p_index]*l.delta[p_index] < cutoff) l.delta[p_index] = 0;
-                    }
-                }
-            }
-            free(costs);
-        }
-
-
+        // calculate the final cost with `l.delta` (sum of squares)
         *(l.cost) = pow(mag_array(l.delta, l.outputs * l.batch), 2);
-
 
         printf("Detection Avg IOU: %f, Pos Cat: %f, All Cat: %f, Pos Obj: %f, Any Obj: %f, count: %d\n", avg_iou/count, avg_cat/count, avg_allcat/(count*l.classes), avg_obj/count, avg_anyobj/(l.batch*locations*l.n), count);
         //if(l.reorg) reorg(l.delta, l.w*l.h, size*l.n, l.batch, 0);
@@ -244,6 +224,7 @@ void forward_detection_layer(const detection_layer l, network_state state)
 
 void backward_detection_layer(const detection_layer l, network_state state)
 {
+    // add the correspond values in l.delta to state.delta
     axpy_cpu(l.batch*l.inputs, 1, l.delta, 1, state.delta, 1);
 }
 
