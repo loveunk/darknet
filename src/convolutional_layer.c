@@ -370,10 +370,10 @@ convolutional_layer make_convolutional_layer(int batch, int steps, int h, int w,
         l.bias_updates = l.share_layer->bias_updates;
     }
     else {
-        l.weights = (float*)calloc(l.nweights, sizeof(float));
+        l.weights = (float*)calloc(l.nweights, sizeof(float));  // size of all filters
         l.weight_updates = (float*)calloc(l.nweights, sizeof(float));
 
-        l.biases = (float*)calloc(n, sizeof(float));
+        l.biases = (float*)calloc(n, sizeof(float));  // n is the filer size
         l.bias_updates = (float*)calloc(n, sizeof(float));
     }
 
