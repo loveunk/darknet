@@ -19,7 +19,6 @@ convnet/
 decaf/
 submission/
 cfg/
-build/darknet/*
 build_*/
 !build/darknet/YoloWrapper.cs
 .fuse*
@@ -54,4 +53,5 @@ share/
 include/darknet/
 uselib
 uselib_track
-darknet
+build/darknet/x64
+build/darknet/*db
