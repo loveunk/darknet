@@ -458,12 +458,19 @@ void do_nms_obj(detection *dets, int total, int classes, float thresh)
     }
 }
 
+/*
+    Apply NMS algorithm to filter bbox.
+    dets   : bounding boxes for NMS
+    total  : num of bbox
+    classes: num of classes
+    thresh : threshold for IoU
+*/
 void do_nms_sort(detection *dets, int total, int classes, float thresh)
 {
     int i, j, k;
     k = total - 1;
     for (i = 0; i <= k; ++i) {
-        if (dets[i].objectness == 0) {
+        if (dets[i].objectness == 0) { // dump the bbox whose objectness is 0
             detection swap = dets[i];
             dets[i] = dets[k];
             dets[k] = swap;
@@ -471,11 +478,11 @@ void do_nms_sort(detection *dets, int total, int classes, float thresh)
             --i;
         }
     }
-    total = k + 1;
+    total = k + 1;                    // shrink the bbox size after applying the filter
 
     for (k = 0; k < classes; ++k) {
         for (i = 0; i < total; ++i) {
-            dets[i].sort_class = k;
+            dets[i].sort_class = k;   // later, sort the bboxes according to the score of this class, descendingly
         }
         qsort(dets, total, sizeof(detection), nms_comparator_v3);
         for (i = 0; i < total; ++i) {

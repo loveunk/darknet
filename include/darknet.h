@@ -820,6 +820,13 @@ LIB_API network *load_network(char *cfg, char *weights, int clear);
 LIB_API load_args get_base_args(network *net);
 
 // box.h
+/*
+    Apply NMS algorithm to filter bbox.
+    dets   : bounding boxes for NMS
+    total  : num of bbox
+    classes: num of classes
+    thresh : threshold for IoU
+*/
 LIB_API void do_nms_sort(detection *dets, int total, int classes, float thresh);
 LIB_API void do_nms_obj(detection *dets, int total, int classes, float thresh);
 

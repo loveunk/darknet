@@ -262,11 +262,11 @@ void forward_yolo_layer(const layer l, network_state state)
 #ifndef GPU
     for (b = 0; b < l.batch; ++b) {
         for (n = 0; n < l.n; ++n) {
-            int index = entry_index(l, b, n*l.w*l.h, 0);
-            activate_array(l.output + index, 2 * l.w*l.h, LOGISTIC);        // x,y,
+            int index = entry_index(l, b, n*l.w*l.h, 0);                        // get x's index
+            activate_array(l.output + index, 2 * l.w*l.h, LOGISTIC);            // apply logistic to x,y
             scal_add_cpu(2 * l.w*l.h, l.scale_x_y, -0.5*(l.scale_x_y - 1), l.output + index, 1);    // scale x,y
-            index = entry_index(l, b, n*l.w*l.h, 4);
-            activate_array(l.output + index, (1 + l.classes)*l.w*l.h, LOGISTIC);
+            index = entry_index(l, b, n*l.w*l.h, 4);                            // get classes' index
+            activate_array(l.output + index, (1 + l.classes)*l.w*l.h, LOGISTIC);// apply logistic to each p(class|obj)
         }
     }
 #endif
@@ -286,10 +286,10 @@ void forward_yolo_layer(const layer l, network_state state)
     int count = 0;
     int class_count = 0;
     *(l.cost) = 0;
-    for (b = 0; b < l.batch; ++b) {
-        for (j = 0; j < l.h; ++j) {
-            for (i = 0; i < l.w; ++i) {
-                for (n = 0; n < l.n; ++n) {
+    for (b = 0; b < l.batch; ++b) {         // batch
+        for (j = 0; j < l.h; ++j) {         // feature map height
+            for (i = 0; i < l.w; ++i) {     // feature map width
+                for (n = 0; n < l.n; ++n) { // anchor box
                     int box_index = entry_index(l, b, n*l.w*l.h + j*l.w + i, 0);
                     box pred = get_yolo_box(l.output, l.biases, l.mask[n], box_index, i, j, l.w, l.h, state.net.w, state.net.h, l.w*l.h);
                     float best_iou = 0;
@@ -517,8 +517,8 @@ int get_yolo_detections(layer l, int w, int h, int netw, int neth, float thresh,
     if (l.batch == 2) avg_flipped_yolo(l);
     int count = 0;
     for (i = 0; i < l.w*l.h; ++i){// loop feature map
-        int row = i / l.w;
-        int col = i % l.w;
+        int row = i / l.w;        // row in the feature map matrix
+        int col = i % l.w;        // col in the feature map matrix
         for(n = 0; n < l.n; ++n){ // loop anchor boxes
             int obj_index  = entry_index(l, 0, n*l.w*l.h + i, 4);
             float objectness = predictions[obj_index];
