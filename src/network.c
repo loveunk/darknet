@@ -761,6 +761,14 @@ void fill_network_boxes(network *net, int w, int h, float thresh, float hier, in
     }
 }
 
+
+/**
+ * w, h: width/height of the original input image
+ * thresh: 0.5 by default (threshold of objectness)
+ * hier: 0.5 by default
+ * relative: 1, box坐标值是否是相对的（归一化后的）
+ * num: number of objects
+**/
 detection *get_network_boxes(network *net, int w, int h, float thresh, float hier, int *map, int relative, int *num, int letter)
 {
     detection *dets = make_network_boxes(net, thresh, num);

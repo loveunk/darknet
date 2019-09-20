@@ -717,9 +717,9 @@ typedef struct ious {
 typedef struct detection{
     box bbox;
     int classes;
-    float *prob;
+    float *prob;       // scores for all classes
     float *mask;
-    float objectness;
+    float objectness;  // confidence value, [p(obj) * IoU]
     int sort_class;
 } detection;
 

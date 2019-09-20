@@ -121,6 +121,9 @@ box get_yolo_box(float *x, float *biases, int n, int index, int i, int j, int lw
     // y` = t.y * lh - i;   // y = ln(y`/(1-y`))   // y - output of previous conv-layer
                             // w = ln(t.w * net.w / anchors_w); // w - output of previous conv-layer
                             // h = ln(t.h * net.h / anchors_h); // h - output of previous conv-layer
+    /*
+    stride: l.w * l.h
+    */
     b.x = (i + x[index + 0*stride]) / lw;
     b.y = (j + x[index + 1*stride]) / lh;
     b.w = exp(x[index + 2*stride]) * biases[2*n]   / w;
@@ -215,10 +218,29 @@ void delta_yolo_class(float *output, float *delta, int index, int class_id, int 
     }
 }
 
+/*               -------------------------------------
+               / anchorbox 2: bbox 0 1 2 ... l.w*l.h /|
+              / anchorbox 1: bbox 0 1 2 ... l.w*l.h / |
+             / anchorbox 0: bbox 0 1 2 ... l.w*l.h /  | (`l.w*l.h` are 13*13, 26*26, 52*52 for 3 different YOLO layers)
+         x: |-------------------------------------|   |
+         y: |                                     |   |
+         w: |                                     |   |
+         h: |                                     |   |
+objectness: |                                     |   |
+   class 1: |                                     |   |
+   class 2: |                                     |   |
+         .: |                                     |   |
+         .: |                                     |   |
+   class .: |                                     |   |
+         .: |                                     |  /
+         .: |                                     | /
+   class80: |-------------------------------------|/
+*/
 static int entry_index(layer l, int batch, int location, int entry)
 {
-    int n =   location / (l.w*l.h);
-    int loc = location % (l.w*l.h);
+    int n =   location / (l.w*l.h); // index for anchor box
+    int loc = location % (l.w*l.h); // index for feature map
+                                    // entry : offset of the value to be featched 
     return batch*l.outputs + n*l.w*l.h*(4+l.classes+1) + entry*l.w*l.h + loc;
 }
 
@@ -494,10 +516,10 @@ int get_yolo_detections(layer l, int w, int h, int netw, int neth, float thresh,
     float *predictions = l.output;
     if (l.batch == 2) avg_flipped_yolo(l);
     int count = 0;
-    for (i = 0; i < l.w*l.h; ++i){
+    for (i = 0; i < l.w*l.h; ++i){// loop feature map
         int row = i / l.w;
         int col = i % l.w;
-        for(n = 0; n < l.n; ++n){
+        for(n = 0; n < l.n; ++n){ // loop anchor boxes
             int obj_index  = entry_index(l, 0, n*l.w*l.h + i, 4);
             float objectness = predictions[obj_index];
             //if(objectness <= thresh) continue;    // incorrect behavior for Nan values
